@@ -1,0 +1,729 @@
+
+#include <avr/io.h>
+#include <util/delay.h>
+
+#define F_CPU 16000000UL
+#define SOUND_VELOCITY 340UL //소리 속도 (m/sec)
+
+unsigned distanceDIA(int TRIG, int ECHO);
+unsigned distanceFLR(int TRIG, int ECHO);
+unsigned distanceBLR(int TRIG, int ECHO);
+unsigned findmin(int a, int b, int c );
+unsigned findmax(int a, int b, int c );
+
+// 전면부 왼쪽 대각선 초음파 센서
+#define TRIGDIAL 6    //Trigger 신호 (출력 = PF6)
+#define ECHODIAL 7     //Echo 신호 (입력 = PF7)
+// 전면부 오른쪽 대각선 초음파 센서
+#define TRIGDIAR 2    //Trigger 신호 (출력 = PF2)
+#define ECHODIAR 3     //Echo 신호 (입력 = PF3)
+
+// 전면부 왼쪽 초음파 센서
+#define TRIGFL 6    //Trigger 신호 (출력 = PE6)
+#define ECHOFL 7     //Echo 신호 (입력 = PE7)
+// 왼쪽  앞 초음파 센서
+#define TRIGFLL 4    //Trigger 신호 (출력 = PE4)
+#define ECHOFLL 5     //Echo 신호 (입력 = PE5)
+// 전면부 오른쪽 초음파 센서
+#define TRIGFR 2    //Trigger 신호 (출력 = PE2)
+#define ECHOFR 3     //Echo 신호 (입력 = PE3)
+// 오른쪽 앞 초음파 센서
+#define TRIGFRR 0    //Trigger 신호 (출력 = PE0)
+#define ECHOFRR 1     //Echo 신호 (입력 = PE1)
+
+// 후면부 왼쪽 초음파 센서
+#define TRIGRL 6    //Trigger 신호 (출력 = PD6)
+#define ECHORL 7     //Echo 신호 (입력 = PD7)
+// 후면부 중앙 초음파 센서
+#define TRIGR 4    //Trigger 신호 (출력 = PD4)
+#define ECHOR 5     //Echo 신호 (입력 = PD5)
+// 후면부 오른쪽 초음파 센서
+#define TRIGRR 2    //Trigger 신호 (출력 = PD2)
+#define ECHORR 3     //Echo 신호 (입력 = PD3)
+
+
+// 왼쪽 뒤 초음파 센서
+#define TRIGRLL 0    //Trigger 신호 (출력 = PF0)
+#define ECHORLL 1     //Echo 신호 (입력 = PF1)
+// 오른쪽 뒤 초음파 센서 
+#define TRIGRRR 4    //Trigger 신호 (출력 = PF4)
+#define ECHORRR 5    //Echo 신호 (입력 = PF5)
+
+int main(void){
+
+	unsigned int speed = 165;  // 기본 속도
+	unsigned int turnspeed = 27;  // 회전시 속도
+
+	unsigned int diff=0;        // 방향 결정 변수 
+	unsigned int dirmin=0;        // 방향 결정 변수 
+	unsigned int dirmax=0;        // 방향 결정 변수 
+
+
+	unsigned int DIAL;         // 전면부 왼쪽 대각 거리 변수
+	unsigned int DIAR;         // 전면부 오른쪽 대각 거리 변수
+
+	unsigned int distanceL;     // 전면부 왼쪽 거리 변수
+	unsigned int distanceR;     // 전면부 오른쪽 거리 변수
+	unsigned int LEFT;          // 왼쪽 거리 변수
+	unsigned int RIGHT;         // 오른쪽 거리 변수
+
+	unsigned int LEFTBACK;      // 왼쪽 뒤 거리 변수
+	unsigned int RIGHTBACK;     // 오른쪽 뒤 거리 변수
+
+	unsigned int BACKL;         //  후면부 왼쪽 거리 변수
+	unsigned int BACK;          //  후면부 거리 변수
+	unsigned int BACKR;         //  후면부 오른쪽 거리 변수
+
+	char SW = 0x07; // 우측 주차 0000 1110 SW2, SW1, SW0 순서
+
+	DDRB=0x30;     // 모터 및 서보모터 출력 설정 0011 0000  
+	DDRA=0xC3;     // 모터 방향 포트 설정  0000 0011 , LED 포트 설정 1100 0000
+
+	TCCR0 = 0x61;  // 모터 PWM, No Prescaling  
+	TCNT0 = 0;     // 모터 TNCT	
+
+	DDRC=0x00; // SW 입력 
+	DDRD=0x55; // TRIGL = 출력 , ECHOL = 입력 setting  a10  b11  c12 d
+	DDRE=0x55; // TRIGL = 출력 , ECHOL = 입력 setting  
+	DDRF=0x55; // TRIGL = 출력 , ECHOL = 입력 setting 
+	
+	TCCR1A=0x82;  // 서보모터 16비트 레지스터 설정
+	TCCR1B=0x1B;  // 서보모터 16비트 레지스터 설정
+	ICR1=4999;    // TOP  
+	OCR1A=351;    // 직진 
+
+	PORTC=0x07; // SW 초기값 0 설정   1111 1111 
+	
+		while(1){ 
+
+      if( (PINC & SW ) == 0x06  ){ // 오른쪽 스위치에 입력이 들어오면 우측면 주차 실행 0000 0110
+	  	
+		PORTA = 0xC1; // 전진 , LED ON 
+
+         while(1){ 
+
+		 	OCR0 = speed - 5 ;	
+
+			RIGHT = distanceFLR(TRIGFRR, ECHOFRR);       // 우측 뒤 거리 측정
+			_delay_ms(10);
+			RIGHTBACK = distanceDIA(TRIGRRR, ECHORRR);   // 우측 뒤 거리 측정
+			_delay_ms(10);				
+
+			if( (RIGHT > 350) && ( RIGHTBACK > 350)){ // 오른쪽 모두 35CM 이상 여유가 있으면 주차 자리 인식
+			 
+			 	while(1){
+
+					PORTA = 0xC1; // 전진
+					OCR1A= 235; // 좌회전 
+					OCR0 = speed+turnspeed - 15 ;
+					_delay_ms(100);	
+					BACKR = distanceBLR(TRIGRR, ECHORR);    // 후면부 우측 거리 측정
+					_delay_ms(10);
+					BACK = distanceBLR(TRIGR, ECHOR);       // 후면부 중앙 거리 측정
+					_delay_ms(10);
+				
+
+					if( (BACKR > 250 )&&( BACKR < 320) ){
+						break;
+						}
+
+					}
+					
+				while(1){ // 후면부가 장애물에 근접할 때까지 후진 
+
+					OCR1A= 401; // 우회전
+					PORTA = 0xC2; // 후진 
+					OCR0 = speed+turnspeed -25 ;
+
+					LEFTBACK = distanceDIA(TRIGRLL, ECHORLL);    // 좌측 뒤 거리 측정
+					_delay_ms(10);
+					RIGHTBACK = distanceDIA(TRIGRRR, ECHORRR);   // 우측 뒤 거리 측정
+					_delay_ms(10);
+					LEFT = distanceFLR(TRIGFLL, ECHOFLL);    // 좌측 앞 거리 측정
+					_delay_ms(10);
+					RIGHT = distanceFLR(TRIGFRR, ECHOFRR);   // 우측 뒤 거리 측정
+					_delay_ms(10);
+
+					if( (LEFTBACK < 120) && (RIGHTBACK < 120) || (LEFT < 30) && (LEFTBACK < 30) || (RIGHT < 30) && (RIGHTBACK < 30)){ // 좌측 우측 뒷부분이 모두 주차 자리에 들어왔다면
+						
+						OCR1A= 351;   // 
+						PORTA = 0xC2; // 후진 
+						OCR0 = speed-10 ;
+
+						BACKL = distanceBLR(TRIGRL, ECHORL);    // 후면부 좌측 거리 측정
+						_delay_ms(10);
+						BACK = distanceBLR(TRIGR, ECHOR);       // 후면부 중앙 거리 측정
+						_delay_ms(10);
+						BACKR = distanceBLR(TRIGRR, ECHORR);    // 후면부 우측 거리 측정
+						_delay_ms(10);
+
+						while( (BACKL > 60) || (BACK > 60) || (BACKR > 60) ){
+	
+							LEFT = distanceFLR(TRIGFLL, ECHOFLL);        // 좌측 앞 거리 측정
+							_delay_ms(10);
+							LEFTBACK = distanceDIA(TRIGRLL, ECHORLL);    // 좌측 뒤 거리 측정
+							_delay_ms(10);
+						
+							if( (LEFT - LEFTBACK) < 10 ){
+								OCR1A= 351; //
+								PORTA = 0xC2; // 후진 
+								OCR0 = speed-10 ;
+							}
+							else if( LEFT > LEFTBACK ){
+								OCR1A= 351+10; //
+								PORTA = 0xC2; // 후진 
+								OCR0 = speed-10 ;
+							} 
+							
+							BACKL = distanceBLR(TRIGRL, ECHORL);    // 후면부 좌측 거리 측정
+							_delay_ms(10);
+							BACK = distanceBLR(TRIGR, ECHOR);       // 후면부 중앙 거리 측정
+							_delay_ms(10);
+							BACKR = distanceBLR(TRIGRR, ECHORR);    // 후면부 우측 거리 측정
+							_delay_ms(10);	
+							
+							while( (BACKL < 60) || (BACK < 60) || (BACKR < 60) ){
+				
+								OCR1A= 351; //
+								PORTA = 0x00; // 후진 
+								OCR0=0 ;
+
+								}					
+						
+							} // 후면부 하나라도 근접 while문 끝
+							 
+						} // 왼쪽 및 오른쪽 뒷부분 근접 if 문 끝
+						
+
+					} // 후진 while문 끝 
+
+				} // 우측 모두 35cm 이상 if 문 끝
+
+ 	     } // 우측 주차 while문 끝
+
+         } // 우측 주차 if SW0문 끝 
+
+      if( ( PINC & SW )== 0x05 ){ // 왼쪽 스위치에 입력이 들어오면 좌측면 주차 실행 000 0101
+         
+		PORTA = 0xC1; // 전진 , LED ON 
+
+		while(1){ 
+
+			OCR0 = speed - 5 ;		
+				
+			LEFT = distanceFLR(TRIGFLL, ECHOFLL);    // 좌측 앞 거리 측정
+			_delay_ms(10);
+			LEFTBACK = distanceDIA(TRIGRLL, ECHORLL);   // 좌측 뒤 거리 측정
+			_delay_ms(10);				
+
+			if( (LEFT > 350) && ( LEFTBACK > 350)){ // 왼쪽 모두 35CM 이상 여유가 있으면 주차 자리 인식
+			 
+			 	while(1){
+
+					PORTA = 0xC1; // 전진
+					OCR1A= 436; // 우회전 
+					OCR0 = speed+turnspeed - 12 ;
+					_delay_ms(100);	
+					BACKL = distanceBLR(TRIGRL, ECHORL);    // 후면부 좌측 거리 측정
+					_delay_ms(10);
+					BACK = distanceBLR(TRIGR, ECHOR);       // 후면부 중앙 거리 측정
+					_delay_ms(10);
+				
+
+					if( (BACKL > 250 )&&( BACKL < 320) ){
+						break;
+						}
+
+					}
+					
+				while(1){ // 후면부가 장애물에 근접할 때까지 후진 
+
+					OCR1A= 275; // 좌회전
+					PORTA = 0xC2; // 후진 
+					OCR0 = speed+turnspeed -25 ;
+
+					LEFTBACK = distanceDIA(TRIGRLL, ECHORLL);    // 좌측 뒤 거리 측정
+					_delay_ms(10);
+					RIGHTBACK = distanceDIA(TRIGRRR, ECHORRR);   // 우측 뒤 거리 측정
+					_delay_ms(10);
+					LEFT = distanceFLR(TRIGFLL, ECHOFLL);    // 좌측 앞 거리 측정
+					_delay_ms(10);
+					RIGHT = distanceFLR(TRIGFRR, ECHOFRR);   // 우측 뒤 거리 측정
+					_delay_ms(10);
+
+					if( (RIGHTBACK < 120) && (LEFTBACK < 120) || (LEFT < 30) && (LEFTBACK < 30) || (RIGHT < 30) && (RIGHTBACK < 30)){ // 좌측 우측 뒷부분이 모두 주차 자리에 들어왔다면
+						
+						OCR1A= 351;   // 
+						PORTA = 0xC2; // 후진 
+						OCR0 = speed-10 ;
+
+						BACKL = distanceBLR(TRIGRL, ECHORL);    // 후면부 좌측 거리 측정
+						_delay_ms(10);
+						BACK = distanceBLR(TRIGR, ECHOR);       // 후면부 중앙 거리 측정
+						_delay_ms(10);
+						BACKR = distanceBLR(TRIGRR, ECHORR);    // 후면부 우측 거리 측정
+						_delay_ms(10);
+
+						while( (BACKL > 60) || (BACK > 60) || (BACKR > 60) ){
+	
+							RIGHT = distanceFLR(TRIGFRR, ECHOFRR);       // 우측 뒤 거리 측정
+							_delay_ms(10);
+							RIGHTBACK = distanceDIA(TRIGRRR, ECHORRR);   // 우측 뒤 거리 측정
+							_delay_ms(10);
+						
+							if( (RIGHT - RIGHTBACK) < 10 ){
+								OCR1A= 351; //
+								PORTA = 0xC2; // 후진 
+								OCR0 = speed-10 ;
+							}
+							else if( RIGHT > RIGHTBACK ){
+								OCR1A= 351-10; //
+								PORTA = 0xC2; // 후진 
+								OCR0 = speed-10 ;
+							} 
+							
+							BACKL = distanceBLR(TRIGRL, ECHORL);    // 후면부 좌측 거리 측정
+							_delay_ms(10);
+							BACK = distanceBLR(TRIGR, ECHOR);       // 후면부 중앙 거리 측정
+							_delay_ms(10);
+							BACKR = distanceBLR(TRIGRR, ECHORR);    // 후면부 우측 거리 측정
+							_delay_ms(10);	
+							
+							while( (BACKL < 60) || (BACK < 60) || (BACKR < 60) ){
+				
+								OCR1A= 351; //
+								PORTA = 0x00; // 후진 
+								OCR0=0 ;
+
+								}					
+						
+							} // 후면부 하나라도 근접 while문 끝
+							 
+						} // 왼쪽 및 오른쪽 뒷부분 근접 if 문 끝
+						
+
+					} // 후진 while문 끝 
+
+				} // 좌측 모두 35cm 이상 if 문 끝
+
+ 		 } // 좌측 주차 while문 끝
+         } // 좌측 주차 if SW1문 끝
+         
+		if( ( PINC & SW )== 0x03 ){ // 중앙 스위치에 입력이 들어오면 장애물 회피주행 실행 000 0011
+
+		turnspeed = 25;  // 회전시 속도
+			
+		while(1){ 
+
+		distanceL = distanceFLR(TRIGFL, ECHOFL); // 전면부 좌측 거리 측정
+		_delay_ms(10);
+		distanceR = distanceFLR(TRIGFR, ECHOFR); // 전면부 우측 거리 측정
+		_delay_ms(10);
+
+		LEFT = distanceFLR(TRIGFLL, ECHOFLL);    // 좌측 앞 거리 측정
+		_delay_ms(10);
+		RIGHT = distanceFLR(TRIGFRR, ECHOFRR);   // 우측 뒤 거리 측정
+		_delay_ms(10);
+
+		DIAL = distanceDIA(TRIGDIAL, ECHODIAL);    // 전면부 대각선 왼쪽 거리 측정
+		_delay_ms(10);
+		DIAR = distanceDIA(TRIGDIAR, ECHODIAR);   // 전면부 대각선 오른쪽 거리 측정
+		_delay_ms(10);
+
+		// 모터 속도 제어 구문 
+
+		PORTA = 0x01; // 01 전진 기본 설정
+
+		if( (distanceL < 200) || ( distanceR < 200 ) ){ // 한쪽이 20CM 이내 장애물 존재한다면 
+			
+			if( (( LEFT < 100 ) && ( RIGHT < 100 )) || (distanceL < 150) || ( distanceR < 150 ) ){ // 양쪽이 모두 10CM 이내로 막혀있다면 
+				
+				while(1){
+
+					OCR1A=350;    //  정방향
+ 					OCR0 = speed;
+					PORTA = 0xC2; // 10 후진   
+					_delay_ms(10);
+
+					distanceL = distanceFLR(TRIGFL, ECHOFL); // 전면부 좌측 거리 측정
+					_delay_ms(10);
+					distanceR = distanceFLR(TRIGFR, ECHOFR); // 전면부 우측 거리 측정
+					_delay_ms(10);
+	
+					BACKL = distanceBLR(TRIGRL, ECHORL);    // 후면부 좌측 거리 측정
+					_delay_ms(10);
+					BACK = distanceBLR(TRIGR, ECHOR);       // 후면부 중앙 거리 측정
+					_delay_ms(10);
+					BACKR = distanceBLR(TRIGRR, ECHORR);    // 후면부 우측 거리 측정
+					_delay_ms(10);
+
+					if( (BACKL < 60) || (BACK < 60) || ( BACKR < 60 ) || (distanceL > 400) || (distanceR > 400)){
+
+						break;
+
+						}
+
+					}
+
+				}
+			else if( LEFT > RIGHT ){ // 왼쪽이 더 멀다면 
+				
+					OCR1A = 230;  // 좌회전
+ 					OCR0 = speed+turnspeed;   
+					_delay_ms(10);
+
+				}
+			else if( LEFT < RIGHT ){ // 오른쪽이 더 멀다면 
+				
+					OCR1A = 440;  // 좌회전
+ 					OCR0 = speed+turnspeed;   
+					_delay_ms(10);
+
+				}
+				
+			}
+
+		else if( DIAR < 250){ // 전면부 오른쪽 대각선 장애물 15CM 이내 접근시
+			
+			OCR1A=225;  //  좌회전
+ 			OCR0 = speed+turnspeed;
+			_delay_ms(20);
+	
+			}
+
+		else if( DIAL < 250){ // 전면부 왼쪽 대각선 장애물 15CM 이내 접근시
+			
+			OCR1A=445;  //  우회전
+ 			OCR0 = speed+turnspeed;
+			_delay_ms(20);
+	
+			}
+
+		else if( (distanceL < 550) && (distanceR < 550) ){   // 전면부 초음파 센서 모두 55cm 이내 장애물 존재하는 경우 측면 초음파 센서 작동
+		
+			
+			if( (distanceL < 100) && (LEFT < 100) ){
+				
+				BACKL = distanceBLR(TRIGRL, ECHORL);    // 후면부 좌측 거리 측정
+				_delay_ms(10);
+				BACK = distanceBLR(TRIGR, ECHOR);       // 후면부 중앙 거리 측정
+				_delay_ms(10);
+				BACKR = distanceBLR(TRIGRR, ECHORR);    // 후면부 우측 거리 측정
+				_delay_ms(10);
+
+				while((BACKL < 100) || (BACK < 100) || (BACKR < 100)){
+
+					PORTA = 0x02; // 후진
+					OCR1A=350;  
+					OCR0 = speed;
+
+					BACKL = distanceBLR(TRIGRL, ECHORL);    // 후면부 좌측 거리 측정
+					_delay_ms(10);
+					BACK = distanceBLR(TRIGR, ECHOR);       // 후면부 중앙 거리 측정
+					_delay_ms(10);
+					BACKR = distanceBLR(TRIGRR, ECHORR);    // 후면부 우측 거리 측정
+					_delay_ms(10);
+					}
+					
+				}
+			else if( (distanceR < 100) && (RIGHT < 100) ){
+				
+				BACKL = distanceBLR(TRIGRL, ECHORL);    // 후면부 좌측 거리 측정
+				_delay_ms(10);
+				BACK = distanceBLR(TRIGR, ECHOR);       // 후면부 중앙 거리 측정
+				_delay_ms(10);
+				BACKR = distanceBLR(TRIGRR, ECHORR);    // 후면부 우측 거리 측정
+				_delay_ms(10);
+
+				while((BACKL < 100) || (BACK < 100) || (BACKR < 100)){
+
+					PORTA = 0x02; // 후진 
+					OCR1A=350;  
+					OCR0 = speed;
+
+					BACKL = distanceBLR(TRIGRL, ECHORL);    // 후면부 좌측 거리 측정
+					_delay_ms(10);
+					BACK = distanceBLR(TRIGR, ECHOR);       // 후면부 중앙 거리 측정
+					_delay_ms(10);
+					BACKR = distanceBLR(TRIGRR, ECHORR);    // 후면부 우측 거리 측정
+					_delay_ms(10);
+					}
+					
+				}
+
+			else if( LEFT > (RIGHT + 350)) { // 좌측 거리가 훨씬 더 긴 경우 좌회전
+					
+				OCR1A=225;  //  좌회전
+ 				OCR0 = speed+turnspeed;
+				_delay_ms(50);
+					
+				}
+				
+			else if( RIGHT > (LEFT + 350) ) { // 우측 거리가 훨씬 더 긴 경우 우회전
+					
+				OCR1A=445;  //  우회전
+ 				OCR0 = speed+turnspeed;
+				_delay_ms(50);
+				
+				}
+				
+			else if( distanceL > distanceR ){ // 전면부 왼쪽 거리가 더 긴 경우
+
+				OCR1A=230;  //  좌회전 
+ 				OCR0 = speed+turnspeed;
+				_delay_ms(50);
+								
+				}
+
+			else if( distanceR > distanceL ){ // 전면부 오른쪽 거리가 더 긴 경우 
+
+				OCR1A=445;  //  우회전 
+ 				OCR0 = speed+turnspeed;
+				_delay_ms(50);
+
+				}
+
+ 			} // 전면부 모두 근접 if 문 끝
+
+		else if( (distanceL < 800 ) || (distanceR < 800) ){ // 전면부 초음파 센서 중 80cm 이내 장애물 존재시
+
+
+			BACKL = distanceBLR(TRIGRL, ECHORL);    // 후면부 좌측 거리 측정
+			_delay_ms(10);
+			BACK = distanceBLR(TRIGR, ECHOR);       // 후면부 중앙 거리 측정
+			_delay_ms(10);
+			BACKR = distanceBLR(TRIGRR, ECHORR);    // 후면부 우측 거리 측정
+				
+			dirmin = findmin(BACKL, BACK, BACKR );
+			dirmax = findmax(BACKL, BACK, BACKR );
+
+			if( (distanceL < 500) && (LEFT < 500) ){ // 우회전 
+
+				OCR1A=445; 
+				OCR0 = speed+turnspeed; 
+				_delay_ms(10);
+				
+				}
+			
+			else if( (distanceR < 500) && (RIGHT < 500) ){ //  좌회전 
+
+				OCR1A=225 ; // 좌회전
+				OCR0 = speed+turnspeed;  
+				_delay_ms(10);
+			
+				}
+				
+			else if( distanceL > (distanceR) ){ // 전면부 왼쪽이 더 멀 때 
+
+				if( LEFT > (RIGHT+50) ){ // 좌측이 더 멀 때 
+
+					OCR1A=350-60; // 좌회전
+					OCR0 = speed+turnspeed;  
+					_delay_ms(10);
+
+					}
+	
+				else if( dirmin == BACKR ){ // 후면부 좌측 거리가 제일 작을 때
+				
+					OCR1A=350-60; // 좌회전
+					OCR0 = speed+turnspeed;  
+					_delay_ms(10);
+
+						}
+
+				else if( dirmax == BACK ){
+
+					OCR1A=350-30; // 직진
+					OCR0 = speed;  
+					_delay_ms(10);
+
+					}
+
+				}
+
+			else if( distanceR > (distanceL) ){ //전면부 오른쪽이 더 멀 때
+
+				if( RIGHT > (LEFT+50) ){ // 우측이 더 멀 때 
+
+					OCR1A=350+60; // 우회전 
+					OCR0 = speed+turnspeed;  
+					_delay_ms(10);
+
+					}
+
+				else if( dirmin == BACKL ){
+					
+					OCR1A=350+60; // 우회전
+					OCR0 = speed+turnspeed;  
+					_delay_ms(10);
+
+					}
+
+				else if( dirmax == BACK ){
+
+					OCR1A=350+30; // 직진
+					OCR0 = speed;  
+					_delay_ms(10);
+
+					}
+
+				}
+
+			} // 전면부 하나라도 80cm 이내 장애물 근접 두번째 else if문 끝  
+			
+		else if( (distanceL > 800 ) && (distanceR > 800) ){
+			
+			if( (LEFT < 120) && (LEFT < RIGHT) ){ // 좌측이 12cm 미만이고 좌측이 우측보다 더 가까울 때
+
+				diff = 350+(RIGHT-LEFT)/100;
+
+				if(diff > 385){
+				
+					OCR1A=385; // 우회전
+
+					}
+
+				else{
+
+					OCR1A=diff; // 우회전
+						
+					}
+
+				OCR0 = speed+turnspeed/2;  
+				_delay_ms(10);
+
+				} 
+			else if( (RIGHT < 120) && (RIGHT < LEFT) ){ // 우측이 12cm 미만이고 우측이 좌측보다 더 가까울 때
+				
+				diff = 350-(LEFT-RIGHT)/100;
+
+				if(diff > 310){
+				
+					OCR1A=310; // 우회전
+
+					}
+
+				else{
+
+					OCR1A=diff; // 우회전
+						
+					}
+
+				OCR0 = speed+turnspeed/1.5;  
+				_delay_ms(10);
+					
+				} 
+
+			else{
+
+				OCR1A=350; // 직진
+				OCR0 = speed;  
+				_delay_ms(10);
+
+				}
+
+			} // 마지막 else if문 끝 									
+
+ 		 }// while문 끝			
+		 } // 장애물 회피 주행 
+   
+
+       } // while문 끝
+
+	} // 메인 문 끝
+
+
+
+unsigned distanceFLR(int TRIG, int ECHO){
+
+   TCCR3B=0x03;     // Timer/Counter3 클록 4us(64분주)
+
+   PORTE &= ~(1<<TRIG);  // TrigL=LOW상태
+   _delay_us(10);         // 10us동안 유지
+
+   PORTE |= (1<<TRIG);   // TrigL=HIGH -> 거리 측정 명령 시작
+   _delay_us(10);         // 10us동안 유지
+
+   PORTE &= ~(1<<TRIG);  // TrigL=LOW -> 거리 측정 명령 끝
+
+   while(!(PINE & (1<<ECHO)));   // EchoL=HIGH가 될 때까지 대기
+   TCNT3=0x0000;     //Timer/Counter1 값 초기화
+
+   while(PINE & (1<<ECHO));     //Echo=LOW가 될 때까지 대기
+   TCCR3B=0x00;     //Timer/Counter1 클록 정지(클록 입력 차단,CS11~CS10=000)
+
+   return (unsigned int)(SOUND_VELOCITY * (TCNT3*4/2)/1000);   // 거리=속도x시간, 거리 단위는 1mm
+}
+
+unsigned distanceBLR(int TRIG, int ECHO){
+
+   TCCR3B=0x03;     // Timer/Counter3 클록 4us(64분주)
+
+   PORTD &= ~(1<<TRIG);  // TrigL=LOW상태
+   _delay_us(10);         // 10us동안 유지
+
+   PORTD |= (1<<TRIG);   // TrigL=HIGH -> 거리 측정 명령 시작
+   _delay_us(10);         // 10us동안 유지
+
+   PORTD &= ~(1<<TRIG);  // TrigL=LOW -> 거리 측정 명령 끝
+
+   while(!(PIND & (1<<ECHO)));   // EchoL=HIGH가 될 때까지 대기
+   TCNT3=0x0000;     //Timer/Counter1 값 초기화
+
+   while(PIND & (1<<ECHO));     //Echo=LOW가 될 때까지 대기
+   TCCR3B=0x00;     //Timer/Counter1 클록 정지(클록 입력 차단,CS11~CS10=000)
+
+   return (unsigned int)(SOUND_VELOCITY * (TCNT3*4/2)/1000);   // 거리=속도x시간, 거리 단위는 1mm
+}
+	
+	
+unsigned distanceDIA(int TRIG, int ECHO){
+
+   TCCR3B=0x03;     // Timer/Counter3 클록 4us(64분주)
+
+   PORTF &= ~(1<<TRIG);  // TrigL=LOW상태
+   _delay_us(10);         // 10us동안 유지
+
+   PORTF |= (1<<TRIG);   // TrigL=HIGH -> 거리 측정 명령 시작
+   _delay_us(10);         // 10us동안 유지
+
+   PORTF &= ~(1<<TRIG);  // TrigL=LOW -> 거리 측정 명령 끝
+
+   while(!(PINF & (1<<ECHO)));   // EchoL=HIGH가 될 때까지 대기
+   TCNT3=0x0000;     //Timer/Counter1 값 초기화
+
+   while(PINF & (1<<ECHO));     //Echo=LOW가 될 때까지 대기
+   TCCR3B=0x00;     //Timer/Counter1 클록 정지(클록 입력 차단,CS11~CS10=000)
+
+   return (unsigned int)(SOUND_VELOCITY * (TCNT3*4/2)/1000);   // 거리=속도x시간, 거리 단위는 1mm
+}
+
+unsigned findmin(int a, int b, int c ){ // 제일 작은 값 찾는 함수
+
+	int min=0;
+
+    if( (a < (b-10)) && (a < (c-10)) )
+       min = a;
+    else if( (b < (a-10)) && (b < (c-10)) )
+       min = b;
+    else
+       min = c;
+
+    return min;
+}
+
+unsigned findmax(int a, int b, int c ){ // 제일 큰 값 찾는 함수
+
+	int max=0;
+
+    if( (a > (b+10)) && (a > (c+10)) )
+       max = a;
+    else if( (b > (a+10)) && (b > (c+10)) )
+       max = b;
+    else
+       max = c;
+
+    return max;
+}
+
+
